@@ -61,25 +61,31 @@ def check_dependencies():
 
 
 def ensure_internal_ip_range_doctype():
-    """Ensure Internal IP Range DocType exists in database"""
+    """Ensure Internal IP Range DocType exists in database
+
+    This function checks if the doctype exists and attempts to create it if missing.
+    Used during installation as a safety check. During migration, Frappe's normal
+    sync process should handle doctype creation from JSON files.
+    """
 
     # Check if DocType already exists in database
     if frappe.db.exists("DocType", "Internal IP Range"):
         print("✅ Internal IP Range DocType exists")
-        return
+        return True
 
     print("🏗️ Creating Internal IP Range DocType...")
 
     try:
-        # Try to reload from JSON file first
+        # Try to reload from JSON file first (preferred method)
         frappe.reload_doctype("Internal IP Range", force=True)
         frappe.db.commit()
         print("✅ Internal IP Range DocType created from JSON")
-        return
+        return True
     except Exception as e:
         print(f"⚠️ Could not reload from JSON: {str(e)}")
-        print("Attempting manual creation...")
 
+    # If running during install (not migrate), try manual creation as fallback
+    # During migrate, rely on Frappe's normal sync process instead
     try:
         # Create the DocType manually if reload fails
         doctype_doc = frappe.new_doc("DocType")
@@ -121,12 +127,16 @@ def ensure_internal_ip_range_doctype():
         frappe.db.commit()
 
         print("✅ Internal IP Range DocType created manually")
+        return True
 
     except Exception as e:
         frappe.log_error(f"Error creating Internal IP Range DocType: {str(e)}", "TrackFlow Install")
-        print(f"❌ Failed to create Internal IP Range DocType: {str(e)}")
-        # Re-raise to prevent installation from continuing with broken state
-        raise Exception(f"Critical: Could not create Internal IP Range DocType. Please contact support.")
+        print(f"⚠️ Warning: Could not create Internal IP Range DocType: {str(e)}")
+        print("Note: This may be normal during migration - Frappe will sync the doctype automatically.")
+        print("If TrackFlow Settings fails to save later, run in console:")
+        print("  frappe.reload_doctype('Internal IP Range', force=True)")
+        # Don't raise exception - let installation/migration continue
+        return False
 
 
 def create_trackflow_settings():
@@ -137,7 +147,12 @@ def create_trackflow_settings():
         return
 
     # Ensure Internal IP Range DocType exists before creating settings
-    ensure_internal_ip_range_doctype()
+    doctype_exists = ensure_internal_ip_range_doctype()
+
+    if not doctype_exists:
+        print("⚠️ Skipping TrackFlow Settings creation - Internal IP Range doctype not ready yet")
+        print("Settings will be created on next migration or manually.")
+        return
 
     print("🏗️ Creating TrackFlow Settings...")
     
