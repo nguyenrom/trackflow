@@ -45,7 +45,7 @@ def check_dependencies():
     """Check if required modules are installed"""
     installed_apps = frappe.get_installed_apps()
     missing = []
-    
+
     # Check for Frappe CRM app
     if "crm" not in [app.lower() for app in installed_apps]:
         missing.append("Frappe CRM")
@@ -55,18 +55,90 @@ def check_dependencies():
         for doctype in required_doctypes:
             if not frappe.db.exists("DocType", doctype):
                 missing.append(f"FCRM DocType: {doctype}")
-    
+
     if missing:
         frappe.throw(_("TrackFlow requires the following: {0}").format(", ".join(missing)))
 
 
+def ensure_internal_ip_range_doctype():
+    """Ensure Internal IP Range DocType exists in database"""
+
+    # Check if DocType already exists in database
+    if frappe.db.exists("DocType", "Internal IP Range"):
+        print("✅ Internal IP Range DocType exists")
+        return
+
+    print("🏗️ Creating Internal IP Range DocType...")
+
+    try:
+        # Try to reload from JSON file first
+        frappe.reload_doctype("Internal IP Range", force=True)
+        frappe.db.commit()
+        print("✅ Internal IP Range DocType created from JSON")
+        return
+    except Exception as e:
+        print(f"⚠️ Could not reload from JSON: {str(e)}")
+        print("Attempting manual creation...")
+
+    try:
+        # Create the DocType manually if reload fails
+        doctype_doc = frappe.new_doc("DocType")
+        doctype_doc.update({
+            "name": "Internal IP Range",
+            "module": "TrackFlow",
+            "istable": 1,  # Child table
+            "engine": "InnoDB",
+            "allow_rename": 0,
+            "index_web_pages_for_search": 1,
+            "sort_field": "modified",
+            "sort_order": "DESC"
+        })
+
+        # Add fields
+        fields = [
+            {
+                "fieldname": "ip_range",
+                "fieldtype": "Data",
+                "label": "IP Range",
+                "reqd": 1,
+                "in_list_view": 1,
+                "description": "IP range in CIDR notation (e.g., 192.168.1.0/24)"
+            },
+            {
+                "fieldname": "description",
+                "fieldtype": "Data",
+                "label": "Description",
+                "in_list_view": 1,
+                "description": "Description of this IP range"
+            }
+        ]
+
+        for field in fields:
+            doctype_doc.append("fields", field)
+
+        # Insert the DocType
+        doctype_doc.insert(ignore_permissions=True)
+        frappe.db.commit()
+
+        print("✅ Internal IP Range DocType created manually")
+
+    except Exception as e:
+        frappe.log_error(f"Error creating Internal IP Range DocType: {str(e)}", "TrackFlow Install")
+        print(f"❌ Failed to create Internal IP Range DocType: {str(e)}")
+        # Re-raise to prevent installation from continuing with broken state
+        raise Exception(f"Critical: Could not create Internal IP Range DocType. Please contact support.")
+
+
 def create_trackflow_settings():
     """Create TrackFlow Settings with default values"""
-    
+
     if frappe.db.exists("TrackFlow Settings", "TrackFlow Settings"):
         print("✅ TrackFlow Settings already exists")
         return
-        
+
+    # Ensure Internal IP Range DocType exists before creating settings
+    ensure_internal_ip_range_doctype()
+
     print("🏗️ Creating TrackFlow Settings...")
     
     try:
@@ -498,10 +570,13 @@ def setup_crm_integration():
 
 def after_migrate():
     """Run after migration"""
+    # Ensure Internal IP Range DocType exists
+    ensure_internal_ip_range_doctype()
+
     # Create custom fields if needed
     create_fcrm_custom_fields()
-    
-    # Create TrackFlow Settings if needed (Internal IP Range DocType should exist from DocType migration)
+
+    # Create TrackFlow Settings if needed
     create_trackflow_settings()
     
     # Create default data
